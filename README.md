@@ -10,15 +10,15 @@ To build it just run `make` using the provided Makefile.
 
 These are the command line options for `dual_tuner_recorder`:
 
-    - -s <serial number>
-    - -r <RSPduo sample rate>
-    - -d <decimation>
-    - -i <IF frequency>
-    - -b <IF bandwidth>
-    - -g <IF gain reduction> ("AGC" to enable AGC)
-    - -l <LNA state>
-    - -f <center frequency>
-    - -s <streaming time (s)> (default: 10s)
+    -s <serial number>
+    -r <RSPduo sample rate>
+    -d <decimation>
+    -i <IF frequency>
+    -b <IF bandwidth>
+    -g <IF gain reduction> ("AGC" to enable AGC)
+    -l <LNA state>
+    -f <center frequency>
+    -s <streaming time (s)> (default: 10s)
 
 
 Here are some usage examples:
@@ -40,14 +40,14 @@ This script uses GNU Radio blocks and therefore requires a recent version of GNU
 
 These are the command line options for `fm_player`:
 
-    - -i <input file> - mandatory
-    - -s <sample rate> - mandatory
-    - -o <frequency offset> - default: 0
-    - -N (FM block: NBFM receive)
-    - -D (FM block: FM demod)
-    - -v <volume> - default: 0.3
-    - -f <center frequency for frequency display> - default: 0
-    - -W (wait for user input) - default: False
+    -i <input file> - mandatory
+    -s <sample rate> - mandatory
+    -o <frequency offset> - default: 0
+    -N (FM block: NBFM receive)
+    -D (FM block: FM demod)
+    -v <volume> - default: 0.3
+    -f <center frequency for frequency display> - default: 0
+    -W (wait for user input) - default: False
 
 
 Here are some usage examples:

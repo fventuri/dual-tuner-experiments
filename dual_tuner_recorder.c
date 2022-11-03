@@ -50,12 +50,18 @@ int main(int argc, char *argv[])
     sdrplay_api_AgcControlT agc = sdrplay_api_AGC_DISABLE;
     int gRdB = 40;
     int LNAstate = 0;
+    int DCenable = 1;
+    int IQenable = 1;
+    int dcCal = 3;
+    int speedUp = 0;
+    int trackTime = 1;
+    int refreshRateTime = 2048;
     double frequency = 100e6;
     int streaming_time = 10;  /* streaming time in seconds */
     const char *output_file = NULL;
 
     int c;
-    while ((c = getopt(argc, argv, "s:r:d:i:b:g:l:f:x:o:h")) != -1) {
+    while ((c = getopt(argc, argv, "s:r:d:i:b:g:l:DIy:f:x:o:h")) != -1) {
         switch (c) {
             case 's':
                 serial_number = optarg;
@@ -95,6 +101,18 @@ int main(int argc, char *argv[])
             case 'l':
                 if (sscanf(optarg, "%d", &LNAstate) != 1) {
                     fprintf(stderr, "invalid LNA state: %s\n", optarg);
+                    exit(1);
+                }
+                break;
+            case 'D':
+                DCenable = 0;
+                break;
+            case 'I':
+                IQenable = 0;
+                break;
+            case 'y':
+                if (sscanf(optarg, "%d,%d,%d,%d", &dcCal, &speedUp, &trackTime, &refreshRateTime) != 4) {
+                    fprintf(stderr, "invalid tuner DC offset compensation parameters: %s\n", optarg);
                     exit(1);
                 }
                 break;
@@ -240,6 +258,18 @@ int main(int argc, char *argv[])
     }
     rx_channelA_params->tunerParams.gain.LNAstate = LNAstate;
     rx_channelB_params->tunerParams.gain.LNAstate = LNAstate;
+    rx_channelA_params->ctrlParams.dcOffset.DCenable = DCenable;
+    rx_channelB_params->ctrlParams.dcOffset.DCenable = DCenable;
+    rx_channelA_params->ctrlParams.dcOffset.IQenable = IQenable;
+    rx_channelB_params->ctrlParams.dcOffset.IQenable = IQenable;
+    rx_channelA_params->tunerParams.dcOffsetTuner.dcCal = dcCal;
+    rx_channelA_params->tunerParams.dcOffsetTuner.speedUp = speedUp;
+    rx_channelA_params->tunerParams.dcOffsetTuner.trackTime = trackTime;
+    rx_channelA_params->tunerParams.dcOffsetTuner.refreshRateTime = refreshRateTime;
+    rx_channelB_params->tunerParams.dcOffsetTuner.dcCal = dcCal;
+    rx_channelB_params->tunerParams.dcOffsetTuner.speedUp = speedUp;
+    rx_channelB_params->tunerParams.dcOffsetTuner.trackTime = trackTime;
+    rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime = refreshRateTime;
     rx_channelA_params->tunerParams.rfFreq.rfHz = frequency;
     rx_channelB_params->tunerParams.rfFreq.rfHz = frequency;
 
@@ -256,7 +286,9 @@ int main(int argc, char *argv[])
     /* print settings */
     fprintf(stdout, "SerNo=%s hwVer=%d tuner=0x%02x rspDuoMode=0x%02x rspDuoSampleFreq=%.0lf\n", device.SerNo, device.hwVer, device.tuner, device.rspDuoMode, device.rspDuoSampleFreq);
     fprintf(stdout, "RX A - LO=%.0lf BW=%d If=%d Dec=%d IFagc=%d IFgain=%d LNAgain=%d\n", rx_channelA_params->tunerParams.rfFreq.rfHz, rx_channelA_params->tunerParams.bwType, rx_channelA_params->tunerParams.ifType, rx_channelA_params->ctrlParams.decimation.decimationFactor, rx_channelA_params->ctrlParams.agc.enable, rx_channelA_params->tunerParams.gain.gRdB, rx_channelA_params->tunerParams.gain.LNAstate);
+    fprintf(stdout, "RX A - DCenable=%d IQenable=%d dcCal=%d speedUp=%d trackTime=%d refreshRateTime=%d\n", (int)(rx_channelA_params->ctrlParams.dcOffset.DCenable), (int)(rx_channelA_params->ctrlParams.dcOffset.IQenable), (int)(rx_channelA_params->tunerParams.dcOffsetTuner.dcCal), (int)(rx_channelA_params->tunerParams.dcOffsetTuner.speedUp), rx_channelA_params->tunerParams.dcOffsetTuner.trackTime, rx_channelA_params->tunerParams.dcOffsetTuner.refreshRateTime);
     fprintf(stdout, "RX B - LO=%.0lf BW=%d If=%d Dec=%d IFagc=%d IFgain=%d LNAgain=%d\n", rx_channelB_params->tunerParams.rfFreq.rfHz, rx_channelB_params->tunerParams.bwType, rx_channelB_params->tunerParams.ifType, rx_channelB_params->ctrlParams.decimation.decimationFactor, rx_channelB_params->ctrlParams.agc.enable, rx_channelB_params->tunerParams.gain.gRdB, rx_channelB_params->tunerParams.gain.LNAstate);
+    fprintf(stdout, "RX B - DCenable=%d IQenable=%d dcCal=%d speedUp=%d trackTime=%d refreshRateTime=%d\n", (int)(rx_channelB_params->ctrlParams.dcOffset.DCenable), (int)(rx_channelB_params->ctrlParams.dcOffset.IQenable), (int)(rx_channelB_params->tunerParams.dcOffsetTuner.dcCal), (int)(rx_channelB_params->tunerParams.dcOffsetTuner.speedUp), rx_channelB_params->tunerParams.dcOffsetTuner.trackTime, rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime);
 
     int init_ok = 1;
     if (device.tuner != sdrplay_api_Tuner_Both) {
@@ -331,6 +363,54 @@ int main(int argc, char *argv[])
     }
     if (rx_channelB_params->tunerParams.gain.LNAstate != LNAstate) {
         fprintf(stderr, "unexpected change - RX B gain.LNAstate: %d -> %d\n", LNAstate, rx_channelB_params->tunerParams.gain.LNAstate);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->ctrlParams.dcOffset.DCenable != DCenable) {
+        fprintf(stderr, "unexpected change - RX A dcOffset.DCenable: %d -> %d\n", DCenable, rx_channelA_params->ctrlParams.dcOffset.DCenable);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->ctrlParams.dcOffset.DCenable != DCenable) {
+        fprintf(stderr, "unexpected change - RX B dcOffset.DCenable: %d -> %d\n", DCenable, rx_channelB_params->ctrlParams.dcOffset.DCenable);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->ctrlParams.dcOffset.IQenable != IQenable) {
+        fprintf(stderr, "unexpected change - RX A dcOffset.IQenable: %d -> %d\n", IQenable, rx_channelA_params->ctrlParams.dcOffset.IQenable);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->ctrlParams.dcOffset.IQenable != IQenable) {
+        fprintf(stderr, "unexpected change - RX B dcOffset.IQenable: %d -> %d\n", IQenable, rx_channelB_params->ctrlParams.dcOffset.IQenable);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->tunerParams.dcOffsetTuner.dcCal != dcCal) {
+        fprintf(stderr, "unexpected change - RX A dcOffsetTuner.dcCal: %d -> %d\n", dcCal, rx_channelA_params->tunerParams.dcOffsetTuner.dcCal);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->tunerParams.dcOffsetTuner.speedUp != speedUp) {
+        fprintf(stderr, "unexpected change - RX A dcOffsetTuner.speedUp: %d -> %d\n", speedUp, rx_channelA_params->tunerParams.dcOffsetTuner.speedUp);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->tunerParams.dcOffsetTuner.trackTime != trackTime) {
+        fprintf(stderr, "unexpected change - RX A dcOffsetTuner.trackTime: %d -> %d\n", trackTime, rx_channelA_params->tunerParams.dcOffsetTuner.trackTime);
+        init_ok = 0;
+    }
+    if (rx_channelA_params->tunerParams.dcOffsetTuner.refreshRateTime != refreshRateTime) {
+        fprintf(stderr, "unexpected change - RX A dcOffsetTuner.refreshRateTime: %d -> %d\n", refreshRateTime, rx_channelA_params->tunerParams.dcOffsetTuner.refreshRateTime);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->tunerParams.dcOffsetTuner.dcCal != dcCal) {
+        fprintf(stderr, "unexpected change - RX B dcOffsetTuner.dcCal: %d -> %d\n", dcCal, rx_channelB_params->tunerParams.dcOffsetTuner.dcCal);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->tunerParams.dcOffsetTuner.speedUp != speedUp) {
+        fprintf(stderr, "unexpected change - RX B dcOffsetTuner.speedUp: %d -> %d\n", speedUp, rx_channelB_params->tunerParams.dcOffsetTuner.speedUp);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->tunerParams.dcOffsetTuner.trackTime != trackTime) {
+        fprintf(stderr, "unexpected change - RX B dcOffsetTuner.trackTime: %d -> %d\n", trackTime, rx_channelB_params->tunerParams.dcOffsetTuner.trackTime);
+        init_ok = 0;
+    }
+    if (rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime != refreshRateTime) {
+        fprintf(stderr, "unexpected change - RX B dcOffsetTuner.refreshRateTime: %d -> %d\n", refreshRateTime, rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime);
         init_ok = 0;
     }
     if (rx_channelA_params->tunerParams.rfFreq.rfHz != frequency) {
@@ -495,8 +575,12 @@ static void usage(const char* progname)
     fprintf(stderr, "    -b <IF bandwidth>\n");
     fprintf(stderr, "    -g <IF gain reduction> (\"AGC\" to enable AGC)\n");
     fprintf(stderr, "    -l <LNA state>\n");
+    fprintf(stderr, "    -D disable post tuner DC offset compensation (default: enabled)\n");
+    fprintf(stderr, "    -I disable post tuner I/Q balance compensation (default: enabled)\n");
+    fprintf(stderr, "    -y tuner DC offset compensation parameters <dcCal,speedUp,trackTime,refeshRateTime> (default: 3,0,1,2048)\n");
     fprintf(stderr, "    -f <center frequency>\n");
-    fprintf(stderr, "    -s <streaming time (s)> (default: 10s)\n");
+    fprintf(stderr, "    -x <streaming time (s)> (default: 10s)\n");
+    fprintf(stderr, "    -o <output file> ('%%c' will be replaced by the channel id (A or B) and 'SAMPLERATE' will be replaced by the estimated sample rate in kHz)\n");
     fprintf(stderr, "    -h show usage\n");
 }
 

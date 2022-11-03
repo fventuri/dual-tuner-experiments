@@ -17,8 +17,12 @@ These are the command line options for `dual_tuner_recorder`:
     -b <IF bandwidth>
     -g <IF gain reduction> ("AGC" to enable AGC)
     -l <LNA state>
+    -D disable post tuner DC offset compensation (default: enabled)
+    -I disable post tuner I/Q balance compensation (default: enabled)
+    -y tuner DC offset compensation parameters <dcCal,speedUp,trackTime,refeshRateTime> (default: 3,0,1,2048)
     -f <center frequency>
-    -s <streaming time (s)> (default: 10s)
+    -x <streaming time (s)> (default: 10s)
+    -o <output file> ('%c' will be replaced by the channel id (A or B) and 'SAMPLERATE' will be replaced by the estimated sample rate in kHz)
 
 
 Here are some usage examples:

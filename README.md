@@ -6,7 +6,15 @@ A collection of tools, programs, and scripts to experiment with the SDRplay RSPd
 
 A simple C program that records to two files the I/Q streams for the A and B channels from an RSPduo in dual tuner mode; sample rate, decimation, IF frequency, IF bandwidth, gains, and center frequency are provided via command line arguments (see below).
 
-To build it just run `make` using the provided Makefile.
+
+To build it run these commands:
+```
+mkdir build
+cd build
+cmake ..
+make (or ninja)
+```
+
 
 These are the command line options for `dual_tuner_recorder`:
 

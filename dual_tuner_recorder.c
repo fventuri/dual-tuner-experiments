@@ -30,6 +30,8 @@ typedef struct {
     unsigned long long total_samples;
     unsigned int next_sample_num;
     int output_fd;
+    short imin, imax;
+    short qmin, qmax;
     char rx_id;
 } RXContext;
 
@@ -444,6 +446,10 @@ int main(int argc, char *argv[])
           .total_samples = 0,
           .next_sample_num = 0xffffffff,
           .output_fd = -1,
+          .imin = SHRT_MAX,
+          .imax = SHRT_MIN,
+          .qmin = SHRT_MAX,
+          .qmax = SHRT_MIN,
           .rx_id = 'A'
         },
         { .earliest_callback = {0, 0},
@@ -451,6 +457,10 @@ int main(int argc, char *argv[])
           .total_samples = 0,
           .next_sample_num = 0xffffffff,
           .output_fd = -1,
+          .imin = SHRT_MAX,
+          .imax = SHRT_MIN,
+          .qmin = SHRT_MAX,
+          .qmax = SHRT_MIN,
           .rx_id = 'B'
         }
     };
@@ -518,6 +528,7 @@ int main(int argc, char *argv[])
         double actual_sample_rate = (double)(rx_context->total_samples) / elapsed_sec;
         int rounded_sample_rate_kHz = (int)(actual_sample_rate / 1000.0 + 0.5);
         fprintf(stderr, "RX %c - total_samples=%llu actual_sample_rate=%.0lf rounded_sample_rate_kHz=%d\n", rx_context->rx_id, rx_context->total_samples, actual_sample_rate, rounded_sample_rate_kHz);
+        fprintf(stderr, "RX %c - I_range=[%hd,%hd] Q_range=[%hd,%hd]\n", rx_context->rx_id, rx_context->imin, rx_context->imax, rx_context->qmin, rx_context->qmax);
         const char *samplerate_string = "SAMPLERATE";
         if (output_file != NULL && strstr(output_file, samplerate_string)) {
             char old_filename[MAX_PATH_SIZE];
@@ -627,6 +638,23 @@ static void rx_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *param
         fprintf(stderr, "RX %c - dropped %d samples\n", rxContext->rx_id, dropped_samples);
     }
     rxContext->next_sample_num = params->firstSampleNum + numSamples;
+
+    short imin = SHRT_MAX;
+    short imax = SHRT_MIN;
+    short qmin = SHRT_MAX;
+    short qmax = SHRT_MIN;
+    for (unsigned int i = 0; i < numSamples; i++) {
+        imin = imin < xi[i] ? imin : xi[i];
+        imax = imax > xi[i] ? imax : xi[i];
+    }
+    for (unsigned int i = 0; i < numSamples; i++) {
+        qmin = qmin < xq[i] ? qmin : xq[i];
+        qmax = qmax > xq[i] ? qmax : xq[i];
+    }
+    rxContext->imin = rxContext->imin < imin ? rxContext->imin : imin;
+    rxContext->imax = rxContext->imax > imax ? rxContext->imax : imax;
+    rxContext->qmin = rxContext->qmin < qmin ? rxContext->qmin : qmin;
+    rxContext->qmax = rxContext->qmax > qmax ? rxContext->qmax : qmax;
 
     /* write samples to output file */
     if (rxContext->output_fd > 0) {

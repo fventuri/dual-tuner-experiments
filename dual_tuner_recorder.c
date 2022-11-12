@@ -46,24 +46,37 @@ int main(int argc, char *argv[])
 {
     const char *serial_number = NULL;
     double rspduo_sample_rate = 0.0;
-    int decimation = 1;
-    sdrplay_api_If_kHzT if_frequency = sdrplay_api_IF_Zero;
-    sdrplay_api_Bw_MHzT if_bandwidth = sdrplay_api_BW_0_200;
-    sdrplay_api_AgcControlT agc = sdrplay_api_AGC_DISABLE;
-    int gRdB = 40;
-    int LNAstate = 0;
-    int DCenable = 1;
-    int IQenable = 1;
+    int decimation_A = 1;
+    int decimation_B = 1;
+    sdrplay_api_If_kHzT if_frequency_A = sdrplay_api_IF_Zero;
+    sdrplay_api_If_kHzT if_frequency_B = sdrplay_api_IF_Zero;
+    sdrplay_api_Bw_MHzT if_bandwidth_A = sdrplay_api_BW_0_200;
+    sdrplay_api_Bw_MHzT if_bandwidth_B = sdrplay_api_BW_0_200;
+    sdrplay_api_AgcControlT agc_A = sdrplay_api_AGC_DISABLE;
+    sdrplay_api_AgcControlT agc_B = sdrplay_api_AGC_DISABLE;
+    int gRdB_A = 40;
+    int gRdB_B = 40;
+    int LNAstate_A = 0;
+    int LNAstate_B = 0;
+    int DCenable_A = 1;
+    int DCenable_B = 1;
+    int IQenable_A = 1;
+    int IQenable_B = 1;
+    // the next four parameters related to DC offset compensation can only
+    // be set identical for both receivers to make things (and code) simpler
     int dcCal = 3;
     int speedUp = 0;
     int trackTime = 1;
     int refreshRateTime = 2048;
-    double frequency = 100e6;
+    double frequency_A = 100e6;
+    double frequency_B = 100e6;
     int streaming_time = 10;  /* streaming time in seconds */
     const char *output_file = NULL;
+    int debug_enable = 0;
 
     int c;
-    while ((c = getopt(argc, argv, "s:r:d:i:b:g:l:DIy:f:x:o:h")) != -1) {
+    while ((c = getopt(argc, argv, "s:r:d:i:b:g:l:DIy:f:x:o:Lh")) != -1) {
+        int n;
         switch (c) {
             case 's':
                 serial_number = optarg;
@@ -75,42 +88,66 @@ int main(int argc, char *argv[])
                 }
                 break;
             case 'd':
-                if (sscanf(optarg, "%d", &decimation) != 1) {
+                n = sscanf(optarg, "%d,%d", &decimation_A, &decimation_B);
+                if (n < 1) {
                     fprintf(stderr, "invalid decimation: %s\n", optarg);
                     exit(1);
                 }
+                if (n == 1)
+                    decimation_B = decimation_A;
                 break;
             case 'i':
-                if (sscanf(optarg, "%d", (int *)(&if_frequency)) != 1) {
+                n = sscanf(optarg, "%d,%d", (int *)(&if_frequency_A), (int *)(&if_frequency_B));
+                if (n < 1) {
                     fprintf(stderr, "invalid IF frequency: %s\n", optarg);
                     exit(1);
                 }
+                if (n == 1)
+                    if_frequency_B = if_frequency_A;
                 break;
             case 'b':
-                if (sscanf(optarg, "%d", (int *)(&if_bandwidth)) != 1) {
+                n = sscanf(optarg, "%d,%d", (int *)(&if_bandwidth_A), (int *)(&if_bandwidth_B));
+                if (n < 1) {
                     fprintf(stderr, "invalid IF bandwidth: %s\n", optarg);
                     exit(1);
                 }
+                if (n == 1)
+                    if_bandwidth_B = if_bandwidth_A;
                 break;
             case 'g':
-                if (strcmp(optarg, "AGC")) {
-                    agc = sdrplay_api_AGC_50HZ;
-                } else if (sscanf(optarg, "%d", &gRdB) != 1) {
-                    fprintf(stderr, "invalid IF gain reduction: %s\n", optarg);
-                    exit(1);
+                if (strcmp(optarg, "AGC") == 0 || strcmp(optarg, "AGC,AGC") == 0) {
+                    agc_A = sdrplay_api_AGC_50HZ;
+                    agc_B = sdrplay_api_AGC_50HZ;
+                } else if (sscanf(optarg, "AGC,%d", &gRdB_B) == 1) {
+                    agc_A = sdrplay_api_AGC_50HZ;
+                } else if (sscanf(optarg, "%d,AGC", &gRdB_A) == 1) {
+                    agc_B = sdrplay_api_AGC_50HZ;
+                } else {
+                    n = sscanf(optarg, "%d,%d", &gRdB_A, &gRdB_B);
+                    if (n < 1) {
+                        fprintf(stderr, "invalid IF gain reduction: %s\n", optarg);
+                        exit(1);
+                    }
+                    if (n == 1)
+                        gRdB_B = gRdB_A;
                 }
                 break;
             case 'l':
-                if (sscanf(optarg, "%d", &LNAstate) != 1) {
+                n = sscanf(optarg, "%d,%d", &LNAstate_A, &LNAstate_B);
+                if (n < 1) {
                     fprintf(stderr, "invalid LNA state: %s\n", optarg);
                     exit(1);
                 }
+                if (n == 1)
+                    LNAstate_B = LNAstate_A;
                 break;
             case 'D':
-                DCenable = 0;
+                DCenable_A = 0;
+                DCenable_B = 0;
                 break;
             case 'I':
-                IQenable = 0;
+                IQenable_A = 0;
+                IQenable_B = 0;
                 break;
             case 'y':
                 if (sscanf(optarg, "%d,%d,%d,%d", &dcCal, &speedUp, &trackTime, &refreshRateTime) != 4) {
@@ -119,10 +156,13 @@ int main(int argc, char *argv[])
                 }
                 break;
             case 'f':
-                if (sscanf(optarg, "%lg", &frequency) != 1) {
+                n = sscanf(optarg, "%lg,%lg", &frequency_A, &frequency_B);
+                if (n < 1) {
                     fprintf(stderr, "invalid frequency: %s\n", optarg);
                     exit(1);
                 }
+                if (n == 1)
+                    frequency_B = frequency_A;
                 break;
             case 'x':
                 if (sscanf(optarg, "%d", &streaming_time) != 1) {
@@ -132,6 +172,9 @@ int main(int argc, char *argv[])
                 break;
             case 'o':
                 output_file = optarg;
+                break;
+            case 'L':
+                debug_enable = 1;
                 break;
 
             // help
@@ -231,6 +274,16 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    if (debug_enable) {
+        err = sdrplay_api_DebugEnable(device.dev, sdrplay_api_DbgLvl_Verbose);
+        if (err != sdrplay_api_Success) {
+            fprintf(stderr, "sdrplay_api_DebugEnable() failed: %s\n", sdrplay_api_GetErrorString(err));
+            sdrplay_api_ReleaseDevice(&device);
+            sdrplay_api_Close();
+            exit(1);
+        }
+    }
+
     // select device settings
     sdrplay_api_DeviceParamsT *device_params;
     err = sdrplay_api_GetDeviceParams(device.dev, &device_params);
@@ -243,27 +296,18 @@ int main(int argc, char *argv[])
     sdrplay_api_RxChannelParamsT *rx_channelA_params = device_params->rxChannelA ;
     sdrplay_api_RxChannelParamsT *rx_channelB_params = device_params->rxChannelB ;
     device_params->devParams->fsFreq.fsHz = rspduo_sample_rate;
-    rx_channelA_params->ctrlParams.decimation.enable = decimation > 1;
-    rx_channelB_params->ctrlParams.decimation.enable = decimation > 1;
-    rx_channelA_params->ctrlParams.decimation.decimationFactor = decimation;
-    rx_channelB_params->ctrlParams.decimation.decimationFactor = decimation;
+    rx_channelA_params->ctrlParams.decimation.enable = decimation_A > 1;
+    rx_channelA_params->ctrlParams.decimation.decimationFactor = decimation_A;
     rx_channelA_params->rspDuoTunerParams.tuner1AmPortSel = sdrplay_api_RspDuo_AMPORT_2;
-    rx_channelA_params->tunerParams.ifType = if_frequency;
-    rx_channelB_params->tunerParams.ifType = if_frequency;
-    rx_channelA_params->tunerParams.bwType = if_bandwidth;
-    rx_channelB_params->tunerParams.bwType = if_bandwidth;
-    rx_channelA_params->ctrlParams.agc.enable = agc;
-    rx_channelB_params->ctrlParams.agc.enable = agc;
-    if (agc == sdrplay_api_AGC_DISABLE) {
-        rx_channelA_params->tunerParams.gain.gRdB = gRdB;
-        rx_channelB_params->tunerParams.gain.gRdB = gRdB;
+    rx_channelA_params->tunerParams.ifType = if_frequency_A;
+    rx_channelA_params->tunerParams.bwType = if_bandwidth_A;
+    rx_channelA_params->ctrlParams.agc.enable = agc_A;
+    if (agc_A == sdrplay_api_AGC_DISABLE) {
+        rx_channelA_params->tunerParams.gain.gRdB = gRdB_A;
     }
-    rx_channelA_params->tunerParams.gain.LNAstate = LNAstate;
-    rx_channelB_params->tunerParams.gain.LNAstate = LNAstate;
-    rx_channelA_params->ctrlParams.dcOffset.DCenable = DCenable;
-    rx_channelB_params->ctrlParams.dcOffset.DCenable = DCenable;
-    rx_channelA_params->ctrlParams.dcOffset.IQenable = IQenable;
-    rx_channelB_params->ctrlParams.dcOffset.IQenable = IQenable;
+    rx_channelA_params->tunerParams.gain.LNAstate = LNAstate_A;
+    rx_channelA_params->ctrlParams.dcOffset.DCenable = DCenable_A;
+    rx_channelA_params->ctrlParams.dcOffset.IQenable = IQenable_A;
     rx_channelA_params->tunerParams.dcOffsetTuner.dcCal = dcCal;
     rx_channelA_params->tunerParams.dcOffsetTuner.speedUp = speedUp;
     rx_channelA_params->tunerParams.dcOffsetTuner.trackTime = trackTime;
@@ -272,8 +316,7 @@ int main(int argc, char *argv[])
     rx_channelB_params->tunerParams.dcOffsetTuner.speedUp = speedUp;
     rx_channelB_params->tunerParams.dcOffsetTuner.trackTime = trackTime;
     rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime = refreshRateTime;
-    rx_channelA_params->tunerParams.rfFreq.rfHz = frequency;
-    rx_channelB_params->tunerParams.rfFreq.rfHz = frequency;
+    rx_channelA_params->tunerParams.rfFreq.rfHz = frequency_A;
 
     /* quick check */
     sdrplay_api_CallbackFnsT callbackNullFns = { NULL, NULL, NULL };
@@ -283,6 +326,57 @@ int main(int argc, char *argv[])
         sdrplay_api_ReleaseDevice(&device);
         sdrplay_api_Close();
         exit(1);
+    }
+    // since sdrplay_api_Init() resets channelB settings to channelA values,
+    // we need to update all the settings for channelB that are different
+    sdrplay_api_ReasonForUpdateT reason_for_update = sdrplay_api_Update_None;
+    if (decimation_B != decimation_A) {
+        rx_channelB_params->ctrlParams.decimation.enable = decimation_B > 1;
+        rx_channelB_params->ctrlParams.decimation.decimationFactor = decimation_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_Decimation;
+    }
+    if (if_frequency_B != if_frequency_A) {
+        rx_channelB_params->tunerParams.ifType = if_frequency_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_IfType;
+    }
+    if (if_bandwidth_B != if_bandwidth_A) {
+        rx_channelB_params->tunerParams.bwType = if_bandwidth_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_BwType;
+    }
+    if (agc_B != agc_A) {
+        rx_channelB_params->ctrlParams.agc.enable = agc_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_Agc;
+    }
+    if (agc_B == sdrplay_api_AGC_DISABLE) {
+        if (gRdB_B != gRdB_A) {
+            rx_channelB_params->tunerParams.gain.gRdB = gRdB_B;
+            reason_for_update |= sdrplay_api_Update_Tuner_Gr;
+        }
+    }
+    if (LNAstate_B != LNAstate_A) {
+        rx_channelB_params->tunerParams.gain.LNAstate = LNAstate_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_Gr;
+    }
+    if (DCenable_B != DCenable_A) {
+        rx_channelB_params->ctrlParams.dcOffset.DCenable = DCenable_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_DCoffsetIQimbalance;
+    }
+    if (IQenable_B != IQenable_A) {
+        rx_channelB_params->ctrlParams.dcOffset.IQenable = IQenable_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_DCoffsetIQimbalance;
+    }
+    if (frequency_B != frequency_A) {
+        rx_channelB_params->tunerParams.rfFreq.rfHz = frequency_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_Frf;
+    }
+    if (reason_for_update != sdrplay_api_Update_None) {
+        err = sdrplay_api_Update(device.dev, sdrplay_api_Tuner_B, reason_for_update, sdrplay_api_Update_Ext1_None);
+        if (err != sdrplay_api_Success) {
+            fprintf(stderr, "sdrplay_api_Update(0x%08x) failed: %s\n", reason_for_update, sdrplay_api_GetErrorString(err));
+            sdrplay_api_ReleaseDevice(&device);
+            sdrplay_api_Close();
+            exit(1);
+        }
     }
 
     /* print settings */
@@ -309,78 +403,80 @@ int main(int argc, char *argv[])
         fprintf(stderr, "unexpected change - fsHz: %.0lf -> %.0lf\n", rspduo_sample_rate, device_params->devParams->fsFreq.fsHz);
         init_ok = 0;
     }
-    if (rx_channelA_params->ctrlParams.decimation.enable != (decimation > 1)) {
-        fprintf(stderr, "unexpected change - RX A decimation.enable: %d -> %d\n", decimation > 1, rx_channelA_params->ctrlParams.decimation.enable);
+    if (rx_channelA_params->ctrlParams.decimation.enable != (decimation_A > 1)) {
+        fprintf(stderr, "unexpected change - RX A decimation.enable: %d -> %d\n", decimation_A > 1, rx_channelA_params->ctrlParams.decimation.enable);
         init_ok = 0;
     }
-    if (rx_channelB_params->ctrlParams.decimation.enable != (decimation > 1)) {
-        fprintf(stderr, "unexpected change - RX B decimation.enable: %d -> %d\n", decimation > 1, rx_channelB_params->ctrlParams.decimation.enable);
+    if (rx_channelB_params->ctrlParams.decimation.enable != (decimation_B > 1)) {
+        fprintf(stderr, "unexpected change - RX B decimation.enable: %d -> %d\n", decimation_B > 1, rx_channelB_params->ctrlParams.decimation.enable);
         init_ok = 0;
     }
-    if (rx_channelA_params->ctrlParams.decimation.decimationFactor != decimation) {
-        fprintf(stderr, "unexpected change - RX A decimation.decimationFactor: %d -> %d\n", decimation, rx_channelA_params->ctrlParams.decimation.decimationFactor);
+    if (rx_channelA_params->ctrlParams.decimation.decimationFactor != decimation_A) {
+        fprintf(stderr, "unexpected change - RX A decimation.decimationFactor: %d -> %d\n", decimation_A, rx_channelA_params->ctrlParams.decimation.decimationFactor);
         init_ok = 0;
     }
-    if (rx_channelB_params->ctrlParams.decimation.decimationFactor != decimation) {
-        fprintf(stderr, "unexpected change - RX B decimation.decimationFactor: %d -> %d\n", decimation, rx_channelB_params->ctrlParams.decimation.decimationFactor);
+    if (rx_channelB_params->ctrlParams.decimation.decimationFactor != decimation_B) {
+        fprintf(stderr, "unexpected change - RX B decimation.decimationFactor: %d -> %d\n", decimation_B, rx_channelB_params->ctrlParams.decimation.decimationFactor);
         init_ok = 0;
     }
-    if (rx_channelA_params->tunerParams.ifType != if_frequency) {
-        fprintf(stderr, "unexpected change - RX A ifType: %d -> %d\n", if_frequency, rx_channelA_params->tunerParams.ifType);
+    if (rx_channelA_params->tunerParams.ifType != if_frequency_A) {
+        fprintf(stderr, "unexpected change - RX A ifType: %d -> %d\n", if_frequency_A, rx_channelA_params->tunerParams.ifType);
         init_ok = 0;
     }
-    if (rx_channelB_params->tunerParams.ifType != if_frequency) {
-        fprintf(stderr, "unexpected change - RX B ifType: %d -> %d\n", if_frequency, rx_channelB_params->tunerParams.ifType);
+    if (rx_channelB_params->tunerParams.ifType != if_frequency_B) {
+        fprintf(stderr, "unexpected change - RX B ifType: %d -> %d\n", if_frequency_B, rx_channelB_params->tunerParams.ifType);
         init_ok = 0;
     }
-    if (rx_channelA_params->tunerParams.bwType != if_bandwidth) {
-        fprintf(stderr, "unexpected change - RX A bwType: %d -> %d\n", if_bandwidth, rx_channelA_params->tunerParams.bwType);
+    if (rx_channelA_params->tunerParams.bwType != if_bandwidth_A) {
+        fprintf(stderr, "unexpected change - RX A bwType: %d -> %d\n", if_bandwidth_A, rx_channelA_params->tunerParams.bwType);
         init_ok = 0;
     }
-    if (rx_channelB_params->tunerParams.bwType != if_bandwidth) {
-        fprintf(stderr, "unexpected change - RX B bwType: %d -> %d\n", if_bandwidth, rx_channelB_params->tunerParams.bwType);
+    if (rx_channelB_params->tunerParams.bwType != if_bandwidth_B) {
+        fprintf(stderr, "unexpected change - RX B bwType: %d -> %d\n", if_bandwidth_B, rx_channelB_params->tunerParams.bwType);
         init_ok = 0;
     }
-    if (rx_channelA_params->ctrlParams.agc.enable != agc) {
-        fprintf(stderr, "unexpected change - RX A agc.enable: %d -> %d\n", agc, rx_channelA_params->ctrlParams.agc.enable);
+    if (rx_channelA_params->ctrlParams.agc.enable != agc_A) {
+        fprintf(stderr, "unexpected change - RX A agc.enable: %d -> %d\n", agc_A, rx_channelA_params->ctrlParams.agc.enable);
         init_ok = 0;
     }
-    if (rx_channelB_params->ctrlParams.agc.enable != agc) {
-        fprintf(stderr, "unexpected change - RX B agc.enable: %d -> %d\n", agc, rx_channelB_params->ctrlParams.agc.enable);
+    if (rx_channelB_params->ctrlParams.agc.enable != agc_B) {
+        fprintf(stderr, "unexpected change - RX B agc.enable: %d -> %d\n", agc_B, rx_channelB_params->ctrlParams.agc.enable);
         init_ok = 0;
     }
-    if (agc == sdrplay_api_AGC_DISABLE) {
-        if (rx_channelA_params->tunerParams.gain.gRdB != gRdB) {
-            fprintf(stderr, "unexpected change - RX A gain.gRdB: %d -> %d\n", gRdB, rx_channelA_params->tunerParams.gain.gRdB);
-            init_ok = 0;
-        }
-        if (rx_channelB_params->tunerParams.gain.gRdB != gRdB) {
-            fprintf(stderr, "unexpected change - RX B gain.gRdB: %d -> %d\n", gRdB, rx_channelB_params->tunerParams.gain.gRdB);
+    if (agc_A == sdrplay_api_AGC_DISABLE) {
+        if (rx_channelA_params->tunerParams.gain.gRdB != gRdB_A) {
+            fprintf(stderr, "unexpected change - RX A gain.gRdB: %d -> %d\n", gRdB_A, rx_channelA_params->tunerParams.gain.gRdB);
             init_ok = 0;
         }
     }
-    if (rx_channelA_params->tunerParams.gain.LNAstate != LNAstate) {
-        fprintf(stderr, "unexpected change - RX A gain.LNAstate: %d -> %d\n", LNAstate, rx_channelA_params->tunerParams.gain.LNAstate);
+    if (agc_B == sdrplay_api_AGC_DISABLE) {
+        if (rx_channelB_params->tunerParams.gain.gRdB != gRdB_B) {
+            fprintf(stderr, "unexpected change - RX B gain.gRdB: %d -> %d\n", gRdB_B, rx_channelB_params->tunerParams.gain.gRdB);
+            init_ok = 0;
+        }
+    }
+    if (rx_channelA_params->tunerParams.gain.LNAstate != LNAstate_A) {
+        fprintf(stderr, "unexpected change - RX A gain.LNAstate: %d -> %d\n", LNAstate_A, rx_channelA_params->tunerParams.gain.LNAstate);
         init_ok = 0;
     }
-    if (rx_channelB_params->tunerParams.gain.LNAstate != LNAstate) {
-        fprintf(stderr, "unexpected change - RX B gain.LNAstate: %d -> %d\n", LNAstate, rx_channelB_params->tunerParams.gain.LNAstate);
+    if (rx_channelB_params->tunerParams.gain.LNAstate != LNAstate_B) {
+        fprintf(stderr, "unexpected change - RX B gain.LNAstate: %d -> %d\n", LNAstate_B, rx_channelB_params->tunerParams.gain.LNAstate);
         init_ok = 0;
     }
-    if (rx_channelA_params->ctrlParams.dcOffset.DCenable != DCenable) {
-        fprintf(stderr, "unexpected change - RX A dcOffset.DCenable: %d -> %d\n", DCenable, rx_channelA_params->ctrlParams.dcOffset.DCenable);
+    if (rx_channelA_params->ctrlParams.dcOffset.DCenable != DCenable_A) {
+        fprintf(stderr, "unexpected change - RX A dcOffset.DCenable: %d -> %d\n", DCenable_A, rx_channelA_params->ctrlParams.dcOffset.DCenable);
         init_ok = 0;
     }
-    if (rx_channelB_params->ctrlParams.dcOffset.DCenable != DCenable) {
-        fprintf(stderr, "unexpected change - RX B dcOffset.DCenable: %d -> %d\n", DCenable, rx_channelB_params->ctrlParams.dcOffset.DCenable);
+    if (rx_channelB_params->ctrlParams.dcOffset.DCenable != DCenable_B) {
+        fprintf(stderr, "unexpected change - RX B dcOffset.DCenable: %d -> %d\n", DCenable_B, rx_channelB_params->ctrlParams.dcOffset.DCenable);
         init_ok = 0;
     }
-    if (rx_channelA_params->ctrlParams.dcOffset.IQenable != IQenable) {
-        fprintf(stderr, "unexpected change - RX A dcOffset.IQenable: %d -> %d\n", IQenable, rx_channelA_params->ctrlParams.dcOffset.IQenable);
+    if (rx_channelA_params->ctrlParams.dcOffset.IQenable != IQenable_A) {
+        fprintf(stderr, "unexpected change - RX A dcOffset.IQenable: %d -> %d\n", IQenable_A, rx_channelA_params->ctrlParams.dcOffset.IQenable);
         init_ok = 0;
     }
-    if (rx_channelB_params->ctrlParams.dcOffset.IQenable != IQenable) {
-        fprintf(stderr, "unexpected change - RX B dcOffset.IQenable: %d -> %d\n", IQenable, rx_channelB_params->ctrlParams.dcOffset.IQenable);
+    if (rx_channelB_params->ctrlParams.dcOffset.IQenable != IQenable_B) {
+        fprintf(stderr, "unexpected change - RX B dcOffset.IQenable: %d -> %d\n", IQenable_B, rx_channelB_params->ctrlParams.dcOffset.IQenable);
         init_ok = 0;
     }
     if (rx_channelA_params->tunerParams.dcOffsetTuner.dcCal != dcCal) {
@@ -415,12 +511,12 @@ int main(int argc, char *argv[])
         fprintf(stderr, "unexpected change - RX B dcOffsetTuner.refreshRateTime: %d -> %d\n", refreshRateTime, rx_channelB_params->tunerParams.dcOffsetTuner.refreshRateTime);
         init_ok = 0;
     }
-    if (rx_channelA_params->tunerParams.rfFreq.rfHz != frequency) {
-        fprintf(stderr, "unexpected change - RX A rfHz: %.0lf -> %.0lf\n", frequency, rx_channelA_params->tunerParams.rfFreq.rfHz);
+    if (rx_channelA_params->tunerParams.rfFreq.rfHz != frequency_A) {
+        fprintf(stderr, "unexpected change - RX A rfHz: %.0lf -> %.0lf\n", frequency_A, rx_channelA_params->tunerParams.rfFreq.rfHz);
         init_ok = 0;
     }
-    if (rx_channelB_params->tunerParams.rfFreq.rfHz != frequency) {
-        fprintf(stderr, "unexpected change - RX B rfHz: %.0lf -> %.0lf\n", frequency, rx_channelB_params->tunerParams.rfFreq.rfHz);
+    if (rx_channelB_params->tunerParams.rfFreq.rfHz != frequency_B) {
+        fprintf(stderr, "unexpected change - RX B rfHz: %.0lf -> %.0lf\n", frequency_B, rx_channelB_params->tunerParams.rfFreq.rfHz);
         init_ok = 0;
     }
 
@@ -497,6 +593,57 @@ int main(int argc, char *argv[])
         sdrplay_api_ReleaseDevice(&device);
         sdrplay_api_Close();
         exit(1);
+    }
+    // since sdrplay_api_Init() resets channelB settings to channelA values,
+    // we need to update all the settings for channelB that are different
+    reason_for_update = sdrplay_api_Update_None;
+    if (decimation_B != decimation_A) {
+        rx_channelB_params->ctrlParams.decimation.enable = decimation_B > 1;
+        rx_channelB_params->ctrlParams.decimation.decimationFactor = decimation_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_Decimation;
+    }
+    if (if_frequency_B != if_frequency_A) {
+        rx_channelB_params->tunerParams.ifType = if_frequency_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_IfType;
+    }
+    if (if_bandwidth_B != if_bandwidth_A) {
+        rx_channelB_params->tunerParams.bwType = if_bandwidth_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_BwType;
+    }
+    if (agc_B != agc_A) {
+        rx_channelB_params->ctrlParams.agc.enable = agc_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_Agc;
+    }
+    if (agc_B == sdrplay_api_AGC_DISABLE) {
+        if (gRdB_B != gRdB_A) {
+            rx_channelB_params->tunerParams.gain.gRdB = gRdB_B;
+            reason_for_update |= sdrplay_api_Update_Tuner_Gr;
+        }
+    }
+    if (LNAstate_B != LNAstate_A) {
+        rx_channelB_params->tunerParams.gain.LNAstate = LNAstate_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_Gr;
+    }
+    if (DCenable_B != DCenable_A) {
+        rx_channelB_params->ctrlParams.dcOffset.DCenable = DCenable_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_DCoffsetIQimbalance;
+    }
+    if (IQenable_B != IQenable_A) {
+        rx_channelB_params->ctrlParams.dcOffset.IQenable = IQenable_B;
+        reason_for_update |= sdrplay_api_Update_Ctrl_DCoffsetIQimbalance;
+    }
+    if (frequency_B != frequency_A) {
+        rx_channelB_params->tunerParams.rfFreq.rfHz = frequency_B;
+        reason_for_update |= sdrplay_api_Update_Tuner_Frf;
+    }
+    if (reason_for_update != sdrplay_api_Update_None) {
+        err = sdrplay_api_Update(device.dev, sdrplay_api_Tuner_B, reason_for_update, sdrplay_api_Update_Ext1_None);
+        if (err != sdrplay_api_Success) {
+            fprintf(stderr, "sdrplay_api_Update(0x%08x) failed: %s\n", reason_for_update, sdrplay_api_GetErrorString(err));
+            sdrplay_api_ReleaseDevice(&device);
+            sdrplay_api_Close();
+            exit(1);
+        }
     }
 
     fprintf(stderr, "streaming for %d seconds\n", streaming_time);
@@ -592,6 +739,7 @@ static void usage(const char* progname)
     fprintf(stderr, "    -f <center frequency>\n");
     fprintf(stderr, "    -x <streaming time (s)> (default: 10s)\n");
     fprintf(stderr, "    -o <output file> ('%%c' will be replaced by the channel id (A or B) and 'SAMPLERATE' will be replaced by the estimated sample rate in kHz)\n");
+    fprintf(stderr, "    -L enable SDRplay API debug log level (default: disabled)\n");
     fprintf(stderr, "    -h show usage\n");
 }
 

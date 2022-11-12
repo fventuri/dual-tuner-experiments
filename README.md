@@ -37,12 +37,12 @@ Here are some usage examples:
 
 - record local NOAA weather radio on 162.55MHz using an RSPduo sample rate of 6MHz and IF=1620kHz:
 ```
-./dual_tuner_recorder -r 6000000 -i 1620 -b 1536 -l 3 -f 162550000 -o noaa-6M-SAMPLERATEk-%c.raw
+./dual_tuner_recorder -r 6000000 -i 1620 -b 1536 -l 3 -f 162550000 -o noaa-6M-SAMPLERATEk-%c.iq16
 ```
 
 - record local NOAA weather radio on 162.55MHz using an RSPduo sample rate of 8MHz and IF=2048kHz:
 ```
-./dual_tuner_recorder -r 8000000 -i 2048 -b 1536 -l 3 -f 162550000 -o noaa-8M-SAMPLERATEk-%c.raw
+./dual_tuner_recorder -r 8000000 -i 2048 -b 1536 -l 3 -f 162550000 -o noaa-8M-SAMPLERATEk-%c.iq16
 ```
 
 ## fm_player
@@ -64,14 +64,14 @@ These are the command line options for `fm_player`:
 
 Here are some usage examples:
 
-- play the I/Q stream for channel A from the first example above (please note that the estimated sample rate in the file name might be slightly different; for instance in my case it was 'noaa-6M-2002k-A.raw'; you may still want to use the command line option `-s 2e6`):
+- play the I/Q stream for channel A from the first example above (please note that the estimated sample rate in the file name might be slightly different; for instance in my case it was 'noaa-6M-2002k-A.iq16'; you may still want to use the command line option `-s 2e6`):
 ```
-./fm_player.py -i noaa-6M-2000k-A.raw -s 2e6 -f 162550000
+./fm_player.py -i noaa-6M-2000k-A.iq16 -s 2e6 -f 162550000
 ```
 
 - play the I/Q stream for channel B from the second example above (see note in the previous example about the I/Q stream recording file name):
 ```
-./fm_player.py -i noaa-8M-2000k-B.raw -s 2e6 -f 162550000
+./fm_player.py -i noaa-8M-2000k-B.iq16 -s 2e6 -f 162550000
 ```
 
 

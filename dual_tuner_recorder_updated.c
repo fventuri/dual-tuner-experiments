@@ -15,25 +15,34 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <sched.h>
 
 #include <sdrplay_api.h>
-
-#include <wiringPi.h>
+#include <pigpio.h>
 
 #define UNUSED(x) (void)(x)
 #define MAX_PATH_SIZE 1024
 
-static volatile int globalCounter = 0;
+//static volatile int g_reset_counts;
 static int pin=17;
-struct timeval begin;
-//struct timeval end;
+static uint32_t pin_mask;
+//struct timeval begin;
+
+typedef struct {
+    uint32_t latest_tick;
+    uint32_t pulse_count;
+} gpioData_t; 
+
+static volatile gpioData_t gpio_data;
 
 typedef struct {
     struct timeval earliest_callback;
     struct timeval latest_callback;
+    uint32_t gpio_tick;
     unsigned long long total_samples;
     unsigned int next_sample_num;
     int output_fd;
@@ -47,14 +56,7 @@ static void rxA_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *para
 static void rxB_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *params, unsigned int numSamples, unsigned int reset, void *cbContext);
 static void event_callback(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT tuner, sdrplay_api_EventParamsT *params, void *cbContext);
 static void rx_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *params, unsigned int numSamples, unsigned int reset, RXContext *rxContext);
-static void MyInterrupt(void){ ++globalCounter; }
-
-PI_THREAD(waitforit)
-{
-    // thread function here
-    while(1)
-        wiringPiISR(pin, INT_EDGE_RISING, &MyInterrupt);
-}
+static void samples(const gpioSample_t *samples, int numSamples);
 
 int main(int argc, char *argv[])
 {
@@ -88,9 +90,14 @@ int main(int argc, char *argv[])
     const char *output_file = NULL;
     int debug_enable = 0;
 
-    wiringPiSetupGpio();
-    pinMode(pin,INPUT);
-    pullUpDnControl(pin,PUD_DOWN);
+    int cfg = gpioCfgGetInternals();
+    cfg |= PI_CFG_NOSIGHANDLER;  // (1<<10)
+    gpioCfgSetInternals(cfg);
+    gpioCfgClock(5, 1, 1);
+
+    gpioInitialise();
+    gpioSetMode(pin, PI_INPUT);
+    gpioSetPullUpDown(pin, PI_PUD_DOWN);
 
     int c;
     while ((c = getopt(argc, argv, "s:r:d:i:b:g:l:DIy:f:x:o:Lh")) != -1) {
@@ -557,6 +564,7 @@ int main(int argc, char *argv[])
     RXContext rx_contexts[] = {
         { .earliest_callback = {0, 0},
           .latest_callback = {0, 0},
+          .gpio_tick = 0,
           .total_samples = 0,
           .next_sample_num = 0xffffffff,
           .output_fd = -1,
@@ -568,6 +576,7 @@ int main(int argc, char *argv[])
         },
         { .earliest_callback = {0, 0},
           .latest_callback = {0, 0},
+          .gpio_tick = 0,
           .total_samples = 0,
           .next_sample_num = 0xffffffff,
           .output_fd = -1,
@@ -605,16 +614,14 @@ int main(int argc, char *argv[])
         }
     }
 
-    piThreadCreate(waitforit);
 
-    while(globalCounter == 0)
-        delayMicroseconds(1);
-    // start measuring timer
-    gettimeofday(&begin,0);
+    pin_mask |= (1<<pin);
+    const struct sched_param priority = {1};
+    sched_setscheduler(0,SCHED_FIFO, &priority);
 
-    printf("edge caught, %d pulses seen\n", globalCounter);
-   // delayMicroseconds(629396);
-    
+
+    gpioSetGetSamplesFunc(samples, pin_mask);
+    usleep(1500000);
     err = sdrplay_api_Init(device.dev, &callbackFns, rx_contexts);
     if (err != sdrplay_api_Success) {
         fprintf(stderr, "sdrplay_api_Init() failed: %s\n", sdrplay_api_GetErrorString(err));
@@ -625,7 +632,7 @@ int main(int argc, char *argv[])
     // since sdrplay_api_Init() resets channelB settings to channelA values,
     // we need to update all the settings for channelB that are different
     reason_for_update = sdrplay_api_Update_None;
-
+    gpioSetGetSamplesFunc(NULL,pin_mask);
     if (decimation_B != decimation_A) {
         rx_channelB_params->ctrlParams.decimation.enable = decimation_B > 1;
         rx_channelB_params->ctrlParams.decimation.decimationFactor = decimation_B;
@@ -677,8 +684,10 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "streaming for %d seconds\n", streaming_time);
     sleep(streaming_time);
-    //gettimeofday(&end,0);
+    
+
     err = sdrplay_api_Uninit(device.dev);
+    sched_setscheduler(0,SCHED_OTHER,&priority);
     if (err != sdrplay_api_Success) {
         fprintf(stderr, "sdrplay_api_Uninit() failed: %s\n", sdrplay_api_GetErrorString(err));
         sdrplay_api_ReleaseDevice(&device);
@@ -688,7 +697,7 @@ int main(int argc, char *argv[])
 
     /* wait one second after sdrplay_api_Uninit() before closing the files */
     sleep(1);
-
+    gpioTerminate();
     for (int i = 0; i < 2; i++) {
         if (rx_contexts[i].output_fd > 0) {
             if (close(rx_contexts[i].output_fd) == -1) {
@@ -701,11 +710,12 @@ int main(int argc, char *argv[])
         RXContext *rx_context = &rx_contexts[i];
         /* estimate actual sample rate */
         double elapsed_sec = (rx_context->latest_callback.tv_sec - rx_context->earliest_callback.tv_sec) + 1e-6 * (rx_context->latest_callback.tv_usec - rx_context->earliest_callback.tv_usec);
-        // Stop measuring time and calculate the elapsed time    
-        long timerseconds = rx_context->earliest_callback.tv_sec - begin.tv_sec;
-        long timermicroseconds = rx_context->earliest_callback.tv_usec - begin.tv_usec;
-        double elapsed = timerseconds + timermicroseconds*1e-6;
-        printf("Time measured: %f seconds.\n", elapsed);
+        // Stop measuring time and calculate the elapsed time 
+        double elapsed_to_pps = (rx_context->gpio_tick - gpio_data.latest_tick) * 1e-6;
+       // long timerseconds = rx_context->earliest_callback.tv_sec - begin.tv_sec;
+       // long timermicroseconds = rx_context->earliest_callback.tv_usec - begin.tv_usec;
+       // double elapsed = timerseconds + timermicroseconds*1e-6;
+        printf("Time measured: %f seconds.\n", elapsed_to_pps);
         double actual_sample_rate = (double)(rx_context->total_samples) / elapsed_sec;
         int rounded_sample_rate_kHz = (int)(actual_sample_rate / 1000.0 + 0.5);
         fprintf(stderr, "RX %c - total_samples=%llu actual_sample_rate=%.0lf rounded_sample_rate_kHz=%d\n", rx_context->rx_id, rx_context->total_samples, actual_sample_rate, rounded_sample_rate_kHz);
@@ -718,7 +728,7 @@ int main(int argc, char *argv[])
             int from = p - old_filename;
             int to = from + strlen(samplerate_string);
             char new_filename[MAX_PATH_SIZE];
-            snprintf(new_filename, MAX_PATH_SIZE, "%.*s%f%s", from, old_filename, elapsed, old_filename + to);
+            snprintf(new_filename, MAX_PATH_SIZE, "%.*s%f%s", from, old_filename, elapsed_to_pps, old_filename + to);
             if (rename(old_filename, new_filename) == -1) {
                 fprintf(stderr, "rename(%s, %s) failed: %s\n", old_filename, new_filename, strerror(errno));
             }
@@ -754,6 +764,60 @@ int main(int argc, char *argv[])
     }
 
     return 0;
+}
+/*
+static void edges(int gpio, int level, uint32_t tick)
+{
+    if (level ==1) 
+    {
+        if (first_time)
+        {
+            gpio_data.latest_tick = tick;
+            gpio_data.pulse_count++;
+            printf("edge caught, %d pulses seen\n", gpio_data.pulse_count);
+            if (gpio != pin){
+                fprintf(stderr, "GPIOpin doesn't match, this is no bueno");
+            }
+            first_time = 0;
+        }
+    }
+
+}
+*/
+
+static void samples(const gpioSample_t *samples, int numSamples)
+{
+    static int inited = 0;
+
+    static uint32_t lastLevel;
+
+    uint32_t high, level;
+    int s;
+
+    for (s=0; s<numSamples; s++)
+    {
+       if (!inited)
+       {
+       inited = 1;
+       lastLevel = samples[0].level;
+       }
+
+       level = samples[s].level;
+       high = ((lastLevel ^ level) & pin_mask) & level;
+       lastLevel = level;
+
+       /* only interested in low to high */
+       if (high)
+       {
+             if (high & (1<<pin)) 
+             {
+                gpio_data.latest_tick = samples[s].tick;
+                gpio_data.pulse_count++;
+                
+             }
+       }
+    }   
+
 }
 
 static void usage(const char* progname)
@@ -799,11 +863,14 @@ static void event_callback(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT 
 
 static void rx_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *params, unsigned int numSamples, unsigned int reset, RXContext *rxContext)
 {
+    uint32_t tick = gpioTick();
     UNUSED(reset);
-
+    
     /* track callback timestamp */
+    
     gettimeofday(&rxContext->latest_callback, NULL);
     if (rxContext->earliest_callback.tv_sec == 0) {
+        rxContext->gpio_tick = tick;
         rxContext->earliest_callback.tv_sec = rxContext->latest_callback.tv_sec;
         rxContext->earliest_callback.tv_usec = rxContext->latest_callback.tv_usec;
     }

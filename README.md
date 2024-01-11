@@ -78,3 +78,4 @@ Here are some usage examples:
 ## Copyright
 
 (C) 2022 Franco Venturi - Licensed under the GNU GPL V3 (see [LICENSE](LICENSE))
+# working on it

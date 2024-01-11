@@ -863,14 +863,13 @@ static void event_callback(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT 
 
 static void rx_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *params, unsigned int numSamples, unsigned int reset, RXContext *rxContext)
 {
-    uint32_t tick = gpioTick();
+
     UNUSED(reset);
     
     /* track callback timestamp */
     
     gettimeofday(&rxContext->latest_callback, NULL);
     if (rxContext->earliest_callback.tv_sec == 0) {
-        rxContext->gpio_tick = tick;
         rxContext->earliest_callback.tv_sec = rxContext->latest_callback.tv_sec;
         rxContext->earliest_callback.tv_usec = rxContext->latest_callback.tv_usec;
     }
@@ -917,6 +916,11 @@ static void rx_callback(short *xi, short *xq, sdrplay_api_StreamCbParamsT *param
         }
         size_t count = numSamples * 2 * sizeof(short);
         ssize_t nwritten = write(rxContext->output_fd, samples, count);
+        uint32_t tick = gpioTick();
+        if (rxContext->earliest_callback.tv_sec == 0){
+            rxContext->gpio_tick = tick;
+        }
+
         if (nwritten == -1) {
             fprintf(stderr, "RX %c - write() failed: %s\n", rxContext->rx_id, strerror(errno));
         } else if ((size_t)nwritten != count) {

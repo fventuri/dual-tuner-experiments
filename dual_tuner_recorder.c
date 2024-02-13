@@ -231,7 +231,7 @@ int main(int argc, char *argv[])
     int device_index = -1;
     for (unsigned int i = 0; i < ndevices; i++) {
         /* we are only interested in RSPduo's */
-        if (devices[i].hwVer == SDRPLAY_RSPduo_ID) {
+        if (devices[i].valid && devices[i].hwVer == SDRPLAY_RSPduo_ID) {
             if (serial_number == NULL || strcmp(devices[i].SerNo, serial_number) == 0) {
                 device_index = i;
                 break;
@@ -691,23 +691,9 @@ int main(int argc, char *argv[])
         }
     }
 
-
-    err = sdrplay_api_LockDeviceApi();
-    if (err != sdrplay_api_Success) {
-        fprintf(stderr, "sdrplay_api_LockDeviceApi() failed: %s\n", sdrplay_api_GetErrorString(err));
-        sdrplay_api_Close();
-        exit(1);
-    }
     err = sdrplay_api_ReleaseDevice(&device);
     if (err != sdrplay_api_Success) {
         fprintf(stderr, "sdrplay_api_ReleaseDevice() failed: %s\n", sdrplay_api_GetErrorString(err));
-        sdrplay_api_UnlockDeviceApi();
-        sdrplay_api_Close();
-        exit(1);
-    }
-    err = sdrplay_api_UnlockDeviceApi();
-    if (err != sdrplay_api_Success) {
-        fprintf(stderr, "sdrplay_api_UnlockDeviceApi() failed: %s\n", sdrplay_api_GetErrorString(err));
         sdrplay_api_Close();
         exit(1);
     }
